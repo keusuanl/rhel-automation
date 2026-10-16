@@ -1,0 +1,20 @@
+---
+- name: Install NFS client packages
+  ansible.builtin.dnf:
+    name: nfs-utils
+    state: present
+
+- name: Ensure the mount point exists
+  ansible.builtin.file:
+    path: /mnt/nfs
+    state: directory
+
+- name: Mount the NFS share persistently
+  ansible.posix.mount:
+    src: 10.50.0.11:/srv/nfs
+    path: /mnt/nfs
+    fstype: nfs4
+    opts: defaults,_netdev
+    dump: 0
+    passno: 0
+    state: mounted

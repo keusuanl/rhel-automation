@@ -1,0 +1,72 @@
+---
+- name: Install NFS and SELinux management packages
+  ansible.builtin.dnf:
+    name:
+      - nfs-utils
+      - policycoreutils-python-utils
+    state: present
+
+- name: Assert /srv/nfs is its own mounted filesystem
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.mounts | selectattr('mount', 'equalto', '/srv/nfs') | list | length == 1
+    fail_msg: "/srv/nfs is not a separate mount on {{ inventory_hostname }}; refusing to continue"
+    success_msg: "/srv/nfs is a separate mount"
+
+- name: Ensure the export root exists
+  ansible.builtin.file:
+    path: /srv/nfs
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure the appdata directory exists
+  ansible.builtin.file:
+    path: /srv/nfs/appdata
+    state: directory
+    owner: labadmin
+    group: labadmin
+    mode: "0770"
+
+- name: Set the persistent SELinux label rule for the export tree
+  community.general.sefcontext:
+    target: '/srv/nfs(/.*)?'
+    setype: public_content_rw_t
+    ftype: a
+    state: present
+  notify: Restore SELinux context on the export tree
+
+- name: Allow nfsd to export read-write
+  ansible.posix.seboolean:
+    name: nfs_export_all_rw
+    state: true
+    persistent: true
+
+- name: Define the NFS export
+  ansible.builtin.copy:
+    dest: /etc/exports
+    content: |
+      /srv/nfs 10.50.0.12(rw,sync,root_squash,no_subtree_check)
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Re-export NFS shares
+
+- name: Open NFS services in the internal zone
+  ansible.posix.firewalld:
+    zone: internal
+    service: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - nfs
+    - rpc-bind
+    - mountd
+
+- name: Ensure the NFS server is enabled and running
+  ansible.builtin.service:
+    name: nfs-server
+    state: started
+    enabled: true

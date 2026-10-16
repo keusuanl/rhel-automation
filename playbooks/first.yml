@@ -1,0 +1,23 @@
+---
+- name: First playbook - prove idempotency
+  hosts: lab
+  become: true
+  tasks:
+    - name: Ensure chrony is installed
+      ansible.builtin.dnf:
+        name: chrony
+        state: present
+
+    - name: Ensure chrony is enabled and running
+      ansible.builtin.service:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Set the login banner
+      ansible.builtin.copy:
+        dest: /etc/motd
+        content: "Managed by Ansible. Manual changes will be overwritten.\n"
+        owner: root
+        group: root
+        mode: "0644"

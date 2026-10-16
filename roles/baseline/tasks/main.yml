@@ -1,0 +1,40 @@
+---
+- name: Put the lab-lan connection in the internal firewall zone
+  community.general.nmcli:
+    conn_name: lab-lan
+    type: ethernet
+    ifname: "{{ lab_interface }}"
+    zone: internal
+    never_default4: true
+    state: present
+
+- name: Assert SELinux is enforcing now and after reboot
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.selinux.status == "enabled"
+      - ansible_facts.selinux.mode == "enforcing"
+      - ansible_facts.selinux.config_mode == "enforcing"
+    fail_msg: "SELinux is not fully enforcing on {{ inventory_hostname }}"
+    success_msg: "SELinux enforcing (runtime and config)"
+
+- name: Ensure labadmin has a fixed UID and sudo access
+  ansible.builtin.user:
+    name: labadmin
+    uid: 1000
+    groups: wheel
+    append: true
+
+- name: Ensure firewalld is enabled and running
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Manage lab host entries in /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - lab hosts"
+    block: |
+      10.50.0.10  control01.lab.local  control01
+      10.50.0.11  infra01.lab.local    infra01
+      10.50.0.12  app01.lab.local      app01

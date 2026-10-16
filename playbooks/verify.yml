@@ -1,0 +1,154 @@
+---
+- name: Verify all lab hosts
+  hosts: lab
+  become: true
+  tasks:
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: SELinux is enforcing now and after reboot
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.selinux.mode == "enforcing"
+          - ansible_facts.selinux.config_mode == "enforcing"
+        fail_msg: "SELinux is not fully enforcing on {{ inventory_hostname }}"
+
+    - name: firewalld is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['firewalld.service'].state == 'running'
+        fail_msg: "firewalld is not running on {{ inventory_hostname }}"
+
+    - name: Ask which zone ens224 is in
+      ansible.builtin.command: firewall-cmd --get-zone-of-interface={{ lab_interface }}
+      register: lab_zone
+      changed_when: false
+
+    - name: lab-lan is in the internal zone
+      ansible.builtin.assert:
+        that: lab_zone.stdout == 'internal'
+        fail_msg: "{{ lab_interface }} is in '{{ lab_zone.stdout }}' on {{ inventory_hostname }}, expected 'internal'"
+
+    - name: Ask which connection is active on the lab NIC
+      ansible.builtin.command: nmcli -g GENERAL.CONNECTION device show {{ lab_interface }}
+      register: lab_conn
+      changed_when: false
+
+    - name: The lab NIC is running the lab-lan profile
+      ansible.builtin.assert:
+        that: lab_conn.stdout == 'lab-lan'
+        fail_msg: "{{ lab_interface }} is running '{{ lab_conn.stdout }}' on {{ inventory_hostname }}, expected 'lab-lan'"
+
+    - name: Look up labadmin
+      ansible.builtin.getent:
+        database: passwd
+        key: labadmin
+
+    - name: labadmin has UID 1000
+      ansible.builtin.assert:
+        that: ansible_facts.getent_passwd.labadmin[1] == '1000'
+        fail_msg: "labadmin UID is not 1000 on {{ inventory_hostname }}"
+
+- name: Verify the NFS server
+  hosts: nfs_servers
+  become: true
+  tasks:
+    - name: Ask systemd whether nfs-server is active
+      ansible.builtin.command: systemctl is-active nfs-server
+      register: nfs_active
+      changed_when: false
+      failed_when: false
+
+    - name: Ask systemd whether nfs-server is enabled at boot
+      ansible.builtin.command: systemctl is-enabled nfs-server
+      register: nfs_enabled
+      changed_when: false
+      failed_when: false
+
+    - name: nfs-server is active and enabled
+      ansible.builtin.assert:
+        that:
+          - nfs_active.stdout == 'active'
+          - nfs_enabled.stdout == 'enabled'
+        fail_msg: "nfs-server is '{{ nfs_active.stdout }}' and '{{ nfs_enabled.stdout }}'"
+
+    - name: /srv/nfs is its own mounted filesystem
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.mounts | selectattr('mount', 'equalto', '/srv/nfs') | list | length == 1
+        fail_msg: "/srv/nfs is not a separate mount"
+
+    - name: Read the SELinux label on the export root
+      ansible.builtin.command: stat -c %C /srv/nfs
+      register: export_label
+      changed_when: false
+
+    - name: Export root has the expected SELinux label
+      ansible.builtin.assert:
+        that: "'public_content_rw_t' in export_label.stdout"
+        fail_msg: "Unexpected label on /srv/nfs: {{ export_label.stdout }}"
+
+    - name: Read the effective export list
+      ansible.builtin.command: exportfs -v
+      register: export_list
+      changed_when: false
+
+    - name: Export is limited to app01 with root_squash
+      ansible.builtin.assert:
+        that:
+          - "'10.50.0.12' in export_list.stdout"
+          - "'root_squash' in export_list.stdout"
+        fail_msg: "Effective exports are not as expected: {{ export_list.stdout }}"
+
+    - name: Ask whether nfs is open in the internal zone
+      ansible.builtin.command: firewall-cmd --zone=internal --query-service=nfs
+      register: nfs_open
+      changed_when: false
+      failed_when: false
+
+    - name: nfs is open in the internal zone
+      ansible.builtin.assert:
+        that: nfs_open.rc == 0
+        fail_msg: "nfs is not open in the internal zone"
+
+- name: Verify the NFS client and end-to-end behaviour
+  hosts: nfs_clients
+  become: true
+  tasks:
+    - name: /mnt/nfs is an nfs4 mount from infra01
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.mounts
+            | selectattr('mount', 'equalto', '/mnt/nfs')
+            | selectattr('fstype', 'equalto', 'nfs4')
+            | selectattr('device', 'equalto', '10.50.0.11:/srv/nfs')
+            | list | length == 1
+        fail_msg: "/mnt/nfs is not mounted as expected"
+
+    - name: Write a test file through the mount as labadmin
+      ansible.builtin.copy:
+        dest: "/mnt/nfs/appdata/.verify-{{ inventory_hostname }}"
+        content: "written by verify.yml\n"
+      become: false
+      changed_when: false
+
+    - name: Look for that file on the server
+      ansible.builtin.stat:
+        path: "/srv/nfs/appdata/.verify-{{ inventory_hostname }}"
+      delegate_to: infra01.lab.local
+      become: false
+      register: server_copy
+
+    - name: The file arrived on the server, owned by labadmin
+      ansible.builtin.assert:
+        that:
+          - server_copy.stat.exists
+          - server_copy.stat.pw_name == 'labadmin'
+        fail_msg: "Test file missing or wrongly owned on the server"
+
+    - name: Remove the test file
+      ansible.builtin.file:
+        path: "/mnt/nfs/appdata/.verify-{{ inventory_hostname }}"
+        state: absent
+      become: false
+      changed_when: false

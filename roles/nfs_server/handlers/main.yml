@@ -1,0 +1,6 @@
+---
+- name: Restore SELinux context on the export tree
+  ansible.builtin.command: restorecon -Rv /srv/nfs
+
+- name: Re-export NFS shares
+  ansible.builtin.command: exportfs -ra
