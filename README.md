@@ -1,5 +1,8 @@
 # RHEL Automation Lab
 
+<img width="580" height="565" alt="kickstart-ansible-diagram" src="https://github.com/user-attachments/assets/3606edc5-5e6d-41ee-96d2-f3cb3353a6fb" />
+
+
 Small Ansible project I use to set up two RHEL hosts:
 
 - **infra01** → NFS server (`/srv/nfs`)
@@ -44,3 +47,18 @@ Or just run everything at once:
 ```bash
 ansible-playbook playbooks/all.yml
 ```
+
+### Screenshots
+
+Kickstart booting process
+
+<img width="602" height="404" alt="boot-kickstart" src="https://github.com/user-attachments/assets/1f2f1c4b-25e9-4d96-818c-50ab58345f84" />
+
+
+
+Running ansible-playbook to check inventory hosts
+
+<img width="795" height="608" alt="Screenshot 2026-10-12 112327" src="https://github.com/user-attachments/assets/42293701-38f3-4b6b-aa23-7d2082d96384" />
+
+<img width="817" height="428" alt="Screenshot 2026-10-08 122302" src="https://github.com/user-attachments/assets/327c7249-3445-4f63-bde8-61a807a37127" />
+
